@@ -5,5 +5,5 @@ window.PULSE_POST_CONFIG = {
   clientKey: "sbaw9m5gi814hq3zsm",
   backendUrl: "https://pulse-post-server.onrender.com",
   redirectUri: "https://ejima0922.github.io/pulse-post/callback.html",
-  scopes: "user.info.basic,video.upload"
+  scopes: "user.info.basic,video.upload,video.publish"
 };
