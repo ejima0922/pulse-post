@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse Post — Connecting</title>
+<style>
+  body{background:#0a1128;color:#f2f0e9;font-family:"Helvetica Neue",Arial,"Hiragino Kaku Gothic ProN",sans-serif;margin:0;padding:24px;line-height:1.6}
+  .wrap{max-width:640px;margin:0 auto}
+  h1{color:#d4af37;font-size:24px}
+  .card{background:#101a3a;border:1px solid #d4af37;border-radius:12px;padding:18px;margin:16px 0}
+  .jp{color:#b9bdd1;font-size:12px}
+  a{color:#e8cf7a}
+  .status{white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pulse Post</h1>
+  <div class="card">
+    <div class="status" id="msg">Connecting to TikTok…<br><span class="jp">接続しています。</span></div>
+  </div>
+  <p><a href="./app.html">Go to the send screen / 送信画面へ</a></p>
+</div>
+<script src="./config.js"></script>
+<script>
+  const cfg = window.PULSE_POST_CONFIG;
+  const msg = document.getElementById('msg');
+  const q = new URLSearchParams(location.search);
+  (async () => {
+    if (q.get('error')) {
+      msg.textContent = 'Authorization was not completed: ' + q.get('error')
+        + (q.get('error_description') ? ' (' + q.get('error_description') + ')' : '');
+      return;
+    }
+    const code = q.get('code');
+    if (!code) { msg.textContent = 'No authorization code was returned.'; return; }
+    if (!cfg.backendUrl) { msg.textContent = 'Server is being prepared. / サーバー準備中です。'; return; }
+    try {
+      const r = await fetch(cfg.backendUrl + '/api/exchange', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({code})
+      });
+      const j = await r.json();
+      if (j.ok) {
+        msg.innerHTML = 'Connected. Your TikTok account is linked to Pulse Post.<br><span class="jp">接続が完了しました。送信画面へ進んでください。</span>';
+      } else {
+        msg.textContent = 'Connection failed: ' + JSON.stringify(j);
+      }
+    } catch (e) {
+      msg.textContent = 'Connection failed: ' + e.message;
+    }
+  })();
+</script>
+</body>
+</html>

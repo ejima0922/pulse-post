@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse Post — Send a video to your TikTok inbox</title>
+<style>
+  body{background:#0a1128;color:#f2f0e9;font-family:"Helvetica Neue",Arial,"Hiragino Kaku Gothic ProN",sans-serif;margin:0;padding:24px;line-height:1.6}
+  .wrap{max-width:640px;margin:0 auto}
+  h1{color:#d4af37;font-size:26px;margin:8px 0 4px}
+  .sub{color:#b9bdd1;font-size:14px;margin:0 0 20px}
+  .card{background:#101a3a;border:1px solid #d4af37;border-radius:12px;padding:18px;margin:16px 0}
+  .card h2{font-size:17px;margin:0 0 8px;color:#e8cf7a}
+  .jp{color:#b9bdd1;font-size:12px}
+  button{background:#d4af37;color:#0a1128;border:0;border-radius:8px;padding:12px 20px;font-size:16px;font-weight:bold;cursor:pointer;width:100%}
+  button:disabled{opacity:.45;cursor:default}
+  input[type=file]{width:100%;margin:8px 0;color:#f2f0e9}
+  textarea{width:100%;box-sizing:border-box;background:#0a1128;color:#f2f0e9;border:1px solid #b9bdd1;border-radius:8px;padding:10px;min-height:64px}
+  .status{white-space:pre-wrap;word-break:break-word;font-size:14px;margin-top:10px}
+  a{color:#e8cf7a}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pulse Post</h1>
+  <p class="sub">Prepare a video and send it to your own TikTok inbox as a draft.<br>
+  <span class="jp">動画を自分のTikTok受信箱へ下書きとして送るための画面です。</span></p>
+
+  <div class="card">
+    <h2>Step 1 — Sign in with TikTok</h2>
+    <p class="jp">TikTokアカウントと接続します。許可するのは、プロフィール情報の読み取りと、受信箱への動画送信です。</p>
+    <button id="signin">Sign in with TikTok</button>
+    <div class="status" id="sessionStatus">Checking connection…</div>
+  </div>
+
+  <div class="card">
+    <h2>Step 2 — Choose a video</h2>
+    <p class="jp">送る動画ファイルを選んでください。</p>
+    <input type="file" id="videoFile" accept="video/*">
+    <p class="jp">投稿文のメモ（受信箱の下書きには文章は付きません。投稿時にアプリで貼るための控えです）</p>
+    <textarea id="captionMemo" placeholder="Caption memo"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>Step 3 — Send to my TikTok inbox</h2>
+    <p class="jp">押すと、動画があなたのTikTok受信箱へ下書きとして届きます。公開はされません。</p>
+    <button id="send" disabled>Send to inbox</button>
+    <div class="status" id="sendStatus"></div>
+  </div>
+
+  <p class="jp"><a href="./index.html">Back to top</a></p>
+</div>
+<script src="./config.js"></script>
+<script>
+  const cfg = window.PULSE_POST_CONFIG;
+  const sessionStatus = document.getElementById('sessionStatus');
+  const sendStatus = document.getElementById('sendStatus');
+  const sendBtn = document.getElementById('send');
+  let connected = false;
+
+  async function refreshSession() {
+    if (!cfg.backendUrl) {
+      sessionStatus.textContent = 'Server is being prepared. / サーバー準備中です。';
+      return;
+    }
+    try {
+      const r = await fetch(cfg.backendUrl + '/api/session');
+      const j = await r.json();
+      connected = !!j.connected;
+      sessionStatus.textContent = connected
+        ? 'Connected to TikTok. / 接続済みです。'
+        : 'Not connected yet. Please sign in. / まだ接続していません。';
+      sendBtn.disabled = !connected;
+    } catch (e) {
+      sessionStatus.textContent = 'Could not reach the server. / サーバーに届きませんでした。';
+    }
+  }
+
+  document.getElementById('signin').addEventListener('click', () => {
+    if (!cfg.clientKey) {
+      sessionStatus.textContent = 'The app key is not set yet. / アプリのキーが未設定です。';
+      return;
+    }
+    const state = Math.random().toString(36).slice(2);
+    const url = 'https://www.tiktok.com/v2/auth/authorize/'
+      + '?client_key=' + encodeURIComponent(cfg.clientKey)
+      + '&scope=' + encodeURIComponent(cfg.scopes)
+      + '&response_type=code'
+      + '&redirect_uri=' + encodeURIComponent(cfg.redirectUri)
+      + '&state=' + encodeURIComponent(state);
+    location.href = url;
+  });
+
+  sendBtn.addEventListener('click', async () => {
+    const f = document.getElementById('videoFile').files[0];
+    if (!f) { sendStatus.textContent = 'Choose a video file first. / 先に動画を選んでください。'; return; }
+    sendBtn.disabled = true;
+    sendStatus.textContent = 'Sending… / 送信中です。';
+    try {
+      const r = await fetch(cfg.backendUrl + '/api/send', {
+        method: 'POST',
+        headers: {'Content-Type': 'video/mp4'},
+        body: f
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(JSON.stringify(j));
+      sendStatus.textContent = 'Sent. publish_id: ' + j.publish_id + '\nChecking status…';
+      for (let i = 0; i < 10; i++) {
+        await new Promise(res => setTimeout(res, 3000));
+        const sr = await fetch(cfg.backendUrl + '/api/status', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({publish_id: j.publish_id})
+        });
+        const sj = await sr.json();
+        const st = sj && sj.detail && sj.detail.data ? sj.detail.data.status : 'unknown';
+        sendStatus.textContent = 'Sent. publish_id: ' + j.publish_id + '\nStatus: ' + st;
+        if (st === 'SEND_TO_USER_INBOX' || st === 'PUBLISH_COMPLETE' || st === 'FAILED') break;
+      }
+      sendStatus.textContent += '\nOpen your TikTok app inbox to review the draft. / TikTokアプリの受信箱で下書きを確認してください。';
+    } catch (e) {
+      sendStatus.textContent = 'Send failed: ' + e.message;
+    } finally {
+      sendBtn.disabled = !connected;
+    }
+  });
+
+  refreshSession();
+</script>
+</body>
+</html>
