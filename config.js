@@ -3,7 +3,7 @@
 // backendUrl: the Pulse Post server origin (no trailing slash).
 window.PULSE_POST_CONFIG = {
   clientKey: "",
-  backendUrl: "",
+  backendUrl: "https://pulse-post-server.onrender.com",
   redirectUri: "https://ejima0922.github.io/pulse-post/callback.html",
   scopes: "user.info.basic,video.upload"
 };
