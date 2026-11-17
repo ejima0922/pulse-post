@@ -28,7 +28,7 @@
 
   <div class="card">
     <h2>Step 1 — Sign in with TikTok</h2>
-    <p class="jp">TikTokアカウントと接続します。許可するのは、プロフィール情報の読み取りと、受信箱への動画送信です。</p>
+    <p class="jp">TikTokアカウントと接続します。許可するのは、プロフィール情報の読み取り、受信箱への動画送信、そのまま投稿することです。</p>
     <button id="signin">Sign in with TikTok</button>
     <div class="status" id="sessionStatus">Checking connection…</div>
   </div>
@@ -48,6 +48,14 @@
     <div class="status" id="sendStatus"></div>
   </div>
 
+  <div class="card">
+    <h2>Step 4 — Post directly (test: private)</h2>
+    <p class="jp">タイトルを入れて押すと、動画がそのまま投稿されます。テストの間は非公開（自分だけ見える）で投稿されます。</p>
+    <textarea id="postTitle" placeholder="Post title"></textarea>
+    <button id="post" disabled style="margin-top:10px">Post directly</button>
+    <div class="status" id="postStatus"></div>
+  </div>
+
   <p class="jp"><a href="./index.html">Back to top</a></p>
 </div>
 <script src="./config.js"></script>
@@ -56,6 +64,8 @@
   const sessionStatus = document.getElementById('sessionStatus');
   const sendStatus = document.getElementById('sendStatus');
   const sendBtn = document.getElementById('send');
+  const postStatus = document.getElementById('postStatus');
+  const postBtn = document.getElementById('post');
   let connected = false;
 
   async function refreshSession() {
@@ -71,6 +81,7 @@
         ? 'Connected to TikTok. / 接続済みです。'
         : 'Not connected yet. Please sign in. / まだ接続していません。';
       sendBtn.disabled = !connected;
+      postBtn.disabled = !connected;
     } catch (e) {
       sessionStatus.textContent = 'Could not reach the server. / サーバーに届きませんでした。';
     }
@@ -122,6 +133,41 @@
       sendStatus.textContent = 'Send failed: ' + e.message;
     } finally {
       sendBtn.disabled = !connected;
+    }
+  });
+
+  postBtn.addEventListener('click', async () => {
+    const f = document.getElementById('videoFile').files[0];
+    if (!f) { postStatus.textContent = 'Choose a video file first. / 先に動画を選んでください。'; return; }
+    const title = document.getElementById('postTitle').value.trim();
+    postBtn.disabled = true;
+    postStatus.textContent = 'Posting… / 投稿中です。';
+    try {
+      const r = await fetch(cfg.backendUrl + '/api/post?title=' + encodeURIComponent(title), {
+        method: 'POST',
+        headers: {'Content-Type': 'video/mp4'},
+        body: f
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(JSON.stringify(j));
+      postStatus.textContent = 'Posted. publish_id: ' + j.publish_id + '\nChecking status…';
+      for (let i = 0; i < 20; i++) {
+        await new Promise(res => setTimeout(res, 3000));
+        const sr = await fetch(cfg.backendUrl + '/api/status', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({publish_id: j.publish_id})
+        });
+        const sj = await sr.json();
+        const st = sj && sj.detail && sj.detail.data ? sj.detail.data.status : 'unknown';
+        postStatus.textContent = 'Posted. publish_id: ' + j.publish_id + '\nStatus: ' + st;
+        if (st === 'PUBLISH_COMPLETE' || st === 'FAILED') break;
+      }
+      postStatus.textContent += '\nThis test post is private (only you can see it). / テスト投稿は非公開です。';
+    } catch (e) {
+      postStatus.textContent = 'Post failed: ' + e.message;
+    } finally {
+      postBtn.disabled = !connected;
     }
   });
 

@@ -5,8 +5,11 @@ Endpoints:
   GET  /health        -> {"ok": true}
   POST /api/exchange  {code}        -> exchange Login Kit code for a token (stored server-side)
   GET  /api/session                 -> whether a token is stored
-  POST /api/send      {title}       -> send the bundled sample video to the connected
-                                       account's TikTok inbox (video.upload / FILE_UPLOAD)
+  POST /api/send      (video bytes) -> send a video to the connected account's
+                                       TikTok inbox (video.upload / FILE_UPLOAD)
+  POST /api/post      (video bytes, ?title=) -> publish a video directly to the
+                                       connected account (video.publish / FILE_UPLOAD,
+                                       privacy fixed to SELF_ONLY in this test build)
   POST /api/status    {publish_id}  -> fetch publish status
 
 Config (env):
@@ -96,11 +99,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path == "/api/exchange":
+        path = self.path.split("?", 1)[0]
+        if path == "/api/exchange":
             return self.exchange()
-        if self.path == "/api/send":
+        if path == "/api/send":
             return self.send_video()
-        if self.path == "/api/status":
+        if path == "/api/post":
+            return self.post_video()
+        if path == "/api/status":
             return self.status()
         return self._json(404, {"error": "not found"})
 
@@ -156,6 +162,61 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             return self._json(502, {"error": "upload PUT failed", "status": e.code,
                                     "detail": e.read().decode(errors="replace")[:500]})
+        if up_status not in (200, 201, 206):
+            return self._json(502, {"error": "upload PUT unexpected status",
+                                    "status": up_status})
+        return self._json(200, {"ok": True, "publish_id": info.get("publish_id")})
+
+    def _read_video(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        data = self.rfile.read(n) if n else b""
+        if not data and SAMPLE.exists():
+            data = SAMPLE.read_bytes()
+        if not data:
+            return None, (400, {"error": "no video data: send the video bytes in the request body"})
+        if len(data) > 256 * 1024 * 1024:
+            return None, (413, {"error": "video too large"})
+        return data, None
+
+    def _put_upload(self, upload_url, data):
+        size = len(data)
+        req = urllib.request.Request(upload_url, data=data, method="PUT")
+        req.add_header("Content-Type", "video/mp4")
+        req.add_header("Content-Length", str(size))
+        req.add_header("Content-Range", f"bytes 0-{size - 1}/{size}")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                return r.status, None
+        except urllib.error.HTTPError as e:
+            return None, (502, {"error": "upload PUT failed", "status": e.code,
+                                "detail": e.read().decode(errors="replace")[:500]})
+
+    def post_video(self):
+        if not TOKEN["access_token"]:
+            return self._json(409, {"error": "not connected: complete TikTok sign-in first"})
+        from urllib.parse import urlparse, parse_qs, unquote
+        qs = parse_qs(urlparse(self.path).query)
+        title = unquote(qs.get("title", [""])[0]).strip() or "Pulse Post test"
+        data, err = self._read_video()
+        if err:
+            return self._json(err[0], err[1])
+        size = len(data)
+        status, resp = http_json(
+            "POST", f"{API}/v2/post/publish/video/init/",
+            headers={"Authorization": f"Bearer {TOKEN['access_token']}"},
+            body={"post_info": {"title": title,
+                                "privacy_level": "SELF_ONLY",
+                                "disable_comment": False,
+                                "disable_duet": False,
+                                "disable_stitch": False},
+                  "source_info": {"source": "FILE_UPLOAD", "video_size": size,
+                                  "chunk_size": size, "total_chunk_count": 1}})
+        info = resp.get("data") or {}
+        if status != 200 or not info.get("upload_url"):
+            return self._json(502, {"error": "post init failed", "detail": resp})
+        up_status, perr = self._put_upload(info["upload_url"], data)
+        if perr:
+            return self._json(perr[0], perr[1])
         if up_status not in (200, 201, 206):
             return self._json(502, {"error": "upload PUT unexpected status",
                                     "status": up_status})
